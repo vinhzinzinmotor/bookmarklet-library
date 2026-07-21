@@ -1,4 +1,4 @@
-javascript: (function () {
+(function () {
   var e = document.getElementById("zzm-nav-panel");
   if (e) {
     e.remove();
