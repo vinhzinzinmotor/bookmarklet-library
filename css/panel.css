@@ -1,0 +1,12 @@
+#zzm-nav-panel {
+  position: fixed;
+  top: 40px;
+  right: 20px;
+  width: 550px;
+  background: white;
+  border-radius: 10px;
+}
+
+.checkbox {
+  transform: scale(1.5);
+}
