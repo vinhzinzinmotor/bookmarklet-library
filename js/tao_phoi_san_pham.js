@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ZZM — Điền Phôi Sản Phẩm
 // @namespace    https://zzm.vn/
-// @version      1.3
-// @description  Tự động điền phôi + vòng lặp + cài đặt mặc định qua giao diện
+// @version      1.4
+// @description  Tự động điền phôi + vòng lặp + cài đặt mặc định qua giao diện + chạy tự động N phôi
 // @author       ZINZINMOTOR
 // @match        https://zzm.vn/wp-admin/post-new.php*
 // @match        https://zzm.vn/wp-admin/post.php*
@@ -64,6 +64,73 @@
 
   var CFG = docCFG();
 
+  // ── 🔁 CHẠY TỰ ĐỘNG N PHÔI (lưu theo phiên của tab) ──
+  var AUTO_TONG_KEY = "zzm_auto_tong";
+  var AUTO_XONG_KEY = "zzm_auto_xong";
+  var AUTO_ID_KEY = "zzm_auto_id_cuoi";
+  function docAuto() {
+    return {
+      tong: parseInt(sessionStorage.getItem(AUTO_TONG_KEY), 10) || 0,
+      xong: parseInt(sessionStorage.getItem(AUTO_XONG_KEY), 10) || 0,
+    };
+  }
+  function huyAuto() {
+    sessionStorage.removeItem(AUTO_TONG_KEY);
+    sessionStorage.removeItem(AUTO_XONG_KEY);
+    sessionStorage.removeItem(AUTO_ID_KEY);
+  }
+  // WordPress tự xoá "message=" khỏi thanh địa chỉ (history.replaceState)
+  // → đọc URL gốc lúc tải trang + kiểm tra thông báo "đã lưu" của WP
+  function daLuuThanhCong() {
+    var nav =
+      performance.getEntriesByType &&
+      performance.getEntriesByType("navigation")[0];
+    if (nav && nav.name.indexOf("message=") !== -1) return true;
+    return !!document.querySelector("#message.updated, #message.notice-success");
+  }
+  // Trả về true nếu cần chuyển sang phôi tiếp theo
+  function xuLyAutoSauLuu(note, tong) {
+    var q = window.location.search;
+    var m = q.match(/[?&]post=(\d+)/);
+    var postId = m ? m[1] : "";
+    var xong = docAuto().xong;
+    if (!daLuuThanhCong() || !postId) {
+      huyAuto();
+      sessionStorage.removeItem(FLAG_KEY);
+      note.style.background = "#C0392B";
+      note.textContent =
+        "⚠️ Không xác nhận được WordPress đã lưu phôi thứ " +
+        (xong + 1) +
+        "/" +
+        tong +
+        " — ĐÃ DỪNG chạy tự động.";
+      return false;
+    }
+    if (sessionStorage.getItem(AUTO_ID_KEY) !== postId) {
+      xong++;
+      sessionStorage.setItem(AUTO_XONG_KEY, String(xong));
+      sessionStorage.setItem(AUTO_ID_KEY, postId);
+    }
+    if (xong >= tong) {
+      huyAuto();
+      sessionStorage.removeItem(FLAG_KEY);
+      note.textContent =
+        "🏁 ĐÃ TẠO XONG " + xong + "/" + tong + " PHÔI! (bấm để ẩn)";
+      note.style.cursor = "pointer";
+      note.onclick = function () {
+        note.remove();
+      };
+      return false;
+    }
+    note.textContent =
+      "✅ Đã lưu phôi " +
+      xong +
+      "/" +
+      tong +
+      "! Đang chuyển sang phôi tiếp theo…";
+    return true;
+  }
+
   var path = window.location.pathname;
   var isNewPage = path.indexOf("post-new.php") !== -1;
   var isEditPage = path.indexOf("post.php") !== -1;
@@ -74,10 +141,14 @@
       note.style.cssText =
         "position:fixed;top:0;left:0;right:0;background:#1E8449;color:#fff;padding:14px;text-align:center;z-index:9999999;font-family:sans-serif;font-weight:bold;font-size:15px";
       note.textContent = "✅ Đã lưu nháp! Đang chuyển sang tạo phôi tiếp theo…";
+      var chuyenTiep = true;
+      var autoTong = docAuto().tong;
+      if (autoTong > 0) chuyenTiep = xuLyAutoSauLuu(note, autoTong);
       document.documentElement.appendChild(note);
-      setTimeout(function () {
-        window.location.href = URL_NEW;
-      }, 900);
+      if (chuyenTiep)
+        setTimeout(function () {
+          window.location.href = URL_NEW;
+        }, 900);
     }
     return;
   }
@@ -192,6 +263,21 @@
       "border-radius:6px;padding:11px 14px;font-size:12px;font-weight:600;",
       "cursor:pointer;font-family:inherit;}",
       "#zs-default:hover{background:#FADBD8;}",
+      ".zp-auto-row{align-items:center;background:#F4F9FF;",
+      "border:1.5px dashed #AED6F1;border-radius:6px;padding:6px 8px;}",
+      ".zp-auto-lbl{font-size:12px;font-weight:700;color:#1A5276;white-space:nowrap;}",
+      ".zp-auto-num{flex:0 0 70px;width:70px;text-align:center;}",
+      "#zzm-phoi-auto{flex:1;background:#1A5276;color:#fff;border:none;",
+      "border-radius:6px;padding:9px;font-size:12.5px;font-weight:700;",
+      "cursor:pointer;font-family:inherit;}",
+      "#zzm-phoi-auto:hover{filter:brightness(1.15);}",
+      ".zp-auto-txt{font-size:12px;font-weight:700;color:#1A5276;white-space:nowrap;}",
+      ".zp-auto-bar{flex:1;height:8px;background:#E0E6EC;border-radius:4px;overflow:hidden;}",
+      "#zp-auto-fill{height:100%;width:0;background:#1E8449;transition:width .3s;}",
+      "#zzm-phoi-stop{background:#FDEDEC;color:#C0392B;border:1.5px solid #F5C6C2;",
+      "border-radius:6px;padding:7px 12px;font-size:12px;font-weight:700;",
+      "cursor:pointer;font-family:inherit;}",
+      "#zzm-phoi-stop:hover{background:#FADBD8;}",
     ].join("");
     document.head.appendChild(ST);
 
@@ -289,6 +375,16 @@
       "</div>",
       '<div class="zp-ft-row">',
       '<button id="zzm-phoi-save">💾 Lưu &amp; Tạo phôi tiếp theo</button>',
+      "</div>",
+      '<div class="zp-ft-row zp-auto-row" id="zp-auto-cfg">',
+      '<span class="zp-auto-lbl">🔁 Số phôi</span>',
+      '<input type="number" min="1" step="1" value="10" class="zp-inp zp-auto-num" id="zp-auto-n">',
+      '<button id="zzm-phoi-auto">🔁 Chạy tự động</button>',
+      "</div>",
+      '<div class="zp-ft-row zp-auto-row" id="zp-auto-run" style="display:none">',
+      '<span class="zp-auto-txt" id="zp-auto-txt"></span>',
+      '<div class="zp-auto-bar"><div id="zp-auto-fill"></div></div>',
+      '<button id="zzm-phoi-stop">⏹ Dừng</button>',
       "</div>",
       "</div>",
       '<div id="zzm-set-ft">',
@@ -418,6 +514,7 @@
 
     document.getElementById("zzm-phoi-close").onclick = function () {
       sessionStorage.removeItem(FLAG_KEY);
+      huyAuto();
       P.remove();
       ST.remove();
     };
@@ -764,6 +861,79 @@
       LG.style.display = "none";
     };
 
+    // ── 🔁 CHẠY TỰ ĐỘNG N PHÔI ──
+    function dungAuto(msg, cls) {
+      huyAuto();
+      sessionStorage.removeItem(FLAG_KEY);
+      document.getElementById("zp-auto-run").style.display = "none";
+      document.getElementById("zp-auto-cfg").style.display = "flex";
+      L("──────────────────────────", "ll-info");
+      L(msg, cls || "ll-err");
+    }
+    function chayAutoPhoi() {
+      var au = docAuto();
+      var txt = document.getElementById("zp-auto-txt");
+      var thuTu = "🔁 Phôi " + (au.xong + 1) + "/" + au.tong;
+      document.getElementById("zp-auto-cfg").style.display = "none";
+      document.getElementById("zp-auto-run").style.display = "flex";
+      document.getElementById("zp-auto-fill").style.width =
+        Math.round((au.xong / au.tong) * 100) + "%";
+      var dem = 2;
+      txt.textContent = thuTu + " — tự lưu sau " + dem + "s";
+      var t = setInterval(function () {
+        // Đã bấm ⏹ Dừng hoặc ✖ Đóng → không lưu nữa
+        if (docAuto().tong === 0) {
+          clearInterval(t);
+          return;
+        }
+        dem--;
+        if (dem > 0) {
+          txt.textContent = thuTu + " — tự lưu sau " + dem + "s";
+          return;
+        }
+        clearInterval(t);
+        txt.textContent = thuTu + " — đang lưu…";
+        // Dùng đúng nút "Lưu & Tạo phôi tiếp theo" — nó chỉ bật cờ khi không có lỗi
+        sessionStorage.removeItem(FLAG_KEY);
+        document.getElementById("zzm-phoi-save").onclick();
+        if (sessionStorage.getItem(FLAG_KEY) !== "1") {
+          dungAuto(
+            "⚠️ Phôi " +
+              (au.xong + 1) +
+              "/" +
+              au.tong +
+              " có lỗi — ĐÃ DỪNG chạy tự động.",
+          );
+          return;
+        }
+        setTimeout(function () {
+          if (sessionStorage.getItem(FLAG_KEY) !== "1")
+            dungAuto("❌ Không lưu được phôi — ĐÃ DỪNG chạy tự động.");
+        }, 900);
+      }, 1000);
+    }
+    document.getElementById("zzm-phoi-auto").onclick = function () {
+      var raw = document.getElementById("zp-auto-n").value.trim();
+      var n = Number(raw);
+      if (!raw || !Number.isInteger(n) || n < 1) {
+        alert("Vui lòng nhập số phôi là số nguyên từ 1 trở lên!");
+        return;
+      }
+      sessionStorage.setItem(AUTO_TONG_KEY, String(n));
+      sessionStorage.setItem(AUTO_XONG_KEY, "0");
+      sessionStorage.removeItem(AUTO_ID_KEY);
+      // Mọi phôi đều dùng Cài đặt đã lưu → nạp lại panel cho phôi đầu tiên
+      napPanelDien();
+      chayAutoPhoi();
+    };
+    document.getElementById("zzm-phoi-stop").onclick = function () {
+      var au = docAuto();
+      dungAuto(
+        "⏹ Đã dừng chạy tự động (đã tạo " + au.xong + "/" + au.tong + " phôi).",
+        "ll-warn",
+      );
+    };
+
     if (CFG.tuDongDien) {
       var r = dienForm();
       setTimeout(function () {
@@ -772,6 +942,12 @@
         if (r.fail) L("❌ Lỗi: " + r.fail + " trường/mục", "ll-err");
         L('🔴 Kiểm tra rồi bấm "💾 Lưu & Tạo phôi tiếp theo"', "ll-warn");
       }, 600);
+    }
+
+    // Đang trong vòng chạy tự động → tiếp tục phôi kế tiếp
+    if (docAuto().tong > 0) {
+      if (sessionStorage.getItem(FLAG_KEY) === "1") chayAutoPhoi();
+      else huyAuto();
     }
   }, 1500);
 })();
