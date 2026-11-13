@@ -23,6 +23,7 @@ Tài liệu tổng hợp dự án. Đọc file này trước khi làm bất cứ
 |---|---|
 | `js/them_san_pham_dan_ao.js` | **Bookmarklet** — gắn sản phẩm (theo SKU) vào từng Xe trong repeater ACF |
 | `js/tao_phoi_san_pham.js` | **Userscript Tampermonkey** — tự điền & tạo phôi sản phẩm mới (v1.4) |
+| `js/xuat_dom.js` | **Bookmarklet** — xuất cây DOM của trang bất kỳ (copy / tải file) để Claude phân tích (v2.0.1) |
 | `_headers` | Cloudflare Pages: đặt `charset=UTF-8` cho JS/CSS/HTML (sửa lỗi font tiếng Việt) |
 | `css/panel.css` | Hiện **không được dùng** (CSS nằm inline trong JS) |
 | `index.html` | Trang chủ tĩnh của host |
@@ -38,6 +39,11 @@ Tài liệu tổng hợp dự án. Đọc file này trước khi làm bất cứ
 javascript:(function(){    var s=document.createElement('script');    s.src='https://bookmarklet-library.pages.dev/js/them_san_pham_dan_ao.js?v='+Date.now();    document.body.appendChild(s);})();
 ```
 File mới → chỉ đổi tên file trong `s.src`, giữ nguyên `?v='+Date.now()`.
+
+**Bookmarklet (`xuat_dom.js`)** — cùng kiểu loader:
+```
+javascript:(function(){var s=document.createElement('script');s.src='https://bookmarklet-library.pages.dev/js/xuat_dom.js?t='+Date.now();document.body.appendChild(s);})();
+```
 
 **Tampermonkey (`tao_phoi_san_pham.js`)** — chạy bản dán sẵn trong Tampermonkey trên máy.
 Chưa có `@updateURL/@downloadURL` → commit **không** tự cập nhật Tampermonkey; phải dán tay.
@@ -151,18 +157,71 @@ Cách đúng (`daLuuThanhCong`): `performance.getEntriesByType("navigation")[0].
 
 ---
 
-## 5. Lịch sử
+## 5. `js/xuat_dom.js` — Bookmarklet xuất DOM (v2.0.1)
+
+Mục đích: người dùng xuất DOM của trang cần làm automation (zzm.vn, Shopee Kênh Người bán…) rồi
+**gửi file/dán nội dung cho Claude phân tích**, thay vì copy DOM thủ công.
+Khi nhận được file xuất, đọc **phần đầu `<!-- … -->`** trước: URL, chế độ, đường dẫn CSS vùng chọn, công nghệ, thống kê, quy ước.
+File tải về mặc định nằm ở **`C:\down ảnh`** (tên: `<tên miền>_<slug tiêu đề>_<yyyymmdd-hhmm>.html`).
+
+### Nguyên tắc an toàn (giữ nguyên khi phát triển)
+- Chỉ ĐỌC trang; panel nằm trong **Shadow DOM** (`#__xuat_dom_host__`) — không đụng CSS/DOM trang.
+- Không có fetch/XHR/POST. Kết quả chỉ copy clipboard hoặc tải file.
+- Cài đặt nhớ theo từng trang: `localStorage["xuatDom.settings"]` = `{mode, clean, collapse, output}`.
+
+### Giao diện panel
+- **Chế độ:** Cả trang / Chọn vùng (rê chuột tô sáng, Click xuất, ↑ thẻ cha, ↓ thu hẹp, Esc hủy; chọn trúng phần tử trong Shadow DOM qua `composedPath()[0]`).
+- **Làm sạch:** Tắt / **Thông minh** (mặc định) / Nghiêm ngặt.
+- **☑ Gộp phần tử lặp lại** (mặc định bật).
+- **Xuất ra:** 📋 Copy (mặc định; lỗi → tự tải file; > 500 KB → cảnh báo vàng) / ⬇ Tải file.
+
+### Bộ chuyển DOM → HTML (`serializeNode` / `serializeChildren`)
+- Bỏ: `style`, `noscript`, comment, `style` inline, nội dung script nội tuyến (chỉ đếm), hình vẽ trong svg, **`data-v-xxxxxxxx(-s)` của Vue** (`RX_VUE_SCOPE`).
+- Giữ thuộc tính: `KEEP_ATTRS` (id, class, name, type, role, placeholder, href, value, for, checked, selected, disabled, readonly, required, multiple, action, method, src, alt, title, rel, content, label, target, colspan, rowspan, hidden, contenteditable, lang, charset, property, http-equiv) + mọi `data-*`, `aria-*`.
+- **Trạng thái thực tế** (`collectAttrs`): input → `el.value`; checkbox/radio → `el.checked`; option → `el.selected`; textarea → `el.value`; password → `[MẬT KHẨU]`.
+- `<script src>` giữ thẻ rỗng; JSON-LD giữ ≤ 3000 ký tự; `<svg>` giữ vỏ + `<title>` + `<!-- icon: #use-href -->`.
+- Đọc `shadowRoot` mở (`<!-- #shadow-root (open) -->`), nội dung `<template>`, iframe cùng tên miền (khác tên miền → ghi chú).
+- **Ẩn:** `data-xd-an="1"` chỉ ở phần tử ẩn ngoài cùng (`checkVisibility({visibilityProperty:true})`, trừ `display:contents`); bỏ qua `NON_VISUAL`, `input[type=hidden]`, nội dung `head`/`template`.
+- **Gộp lặp:** ≥ 6 anh em liền kề cùng `thẻ + class` → giữ 3, ghi `<!-- … lược bỏ N phần tử giống nhau (tag.class) -->`. Không gộp `meta`, `link`, `script`.
+- Cắt bớt: chữ & thuộc tính > 300 ký tự → `…[+N ký tự]`. Data URI → `[BASE64]`. Thụt dòng 2 dấu cách/cấp.
+
+### Làm sạch
+| Mức | Chữ | Thuộc tính / URL |
+|---|---|---|
+| Tắt | giữ nguyên | giữ nguyên |
+| **Thông minh** | giữ chữ & **số** (giá, tồn kho, mã SP); che `[EMAIL]`, `[SĐT]` | che `[ẨN]`: tên thuộc tính khớp `SECRET_NAME_RX` (data-nonce…), value/content của phần tử có `name` chứa nonce/token/security; tham số URL khớp `SECRET_PARAM_RX` (`_wpnonce`, `key`, `token`…); `mailto:` / `tel:` |
+| Nghiêm ngặt | `[TEXT]`, trừ chữ trong `UI_TEXT_SEL` (button, label, option, th, legend, h1–h6, summary, caption, svg); che thêm `[SỐ]` (≥ 6 chữ số) | như Thông minh + value ô nhập → `[TEXT]` |
+
+URL & tiêu đề ở phần đầu file cũng được làm sạch.
+
+### Phần đầu file (header)
+URL, Tiêu đề, Thời gian, Ngôn ngữ, Trạng thái tải, Cửa sổ + vị trí cuộn, **Công nghệ** (`techInfo`: WordPress/phiên bản — admin đọc từ body class `version-x-y`, WooCommerce, ACF, jQuery, select2, TinyMCE, Next.js, React, Vue, Angular), Chế độ (+ đường dẫn CSS vùng chọn, có `#shadow-root`), Làm sạch (số chỗ che), Phần tử (ẩn, shadow root), Gộp lặp, Script, Iframe, Đã loại bỏ, **Quy ước ký hiệu**.
+
+### Kết quả kiểm chứng (2026-11-13, Shopee "Thông tin bán hàng")
+v2.0.0 → v2.0.1: giá `[SỐ]` → `157000`; 2.180 thuộc tính Vue → 0; 273 KB → 233 KB. Thụt dòng vẫn chiếm ~60% dung lượng.
+
+### Ý tưởng chờ (chưa làm — cần hỏi trước)
+- Thụt dòng 1 dấu cách/cấp (giảm thêm ~25–30%).
+- Checkbox "Rút gọn phần tử ẩn" (mặc định tắt): chỉ giữ thẻ ngoài + số phần tử con.
+
+---
+
+## 6. Lịch sử
 | Commit | Nội dung |
 |---|---|
 | `28ec69f` → `952cf25` | Khởi tạo, sửa JS đầu tiên, sửa font tiếng Việt (`_headers`) |
 | `433d165` | Đổi tên thành `them_san_pham_dan_ao` |
 | `ebb2c65` | Thêm `tao_phoi_san_pham.js` (Tampermonkey v1.3) |
 | `78eeded` | Làm lại giao diện bookmarklet: bảng SKU + trạng thái từng dòng |
-| (sau đó) | Tampermonkey v1.4: Chạy tự động N phôi + sửa xác nhận lưu bằng `daLuuThanhCong()` |
+| `1ba61c3` | Tampermonkey v1.4: Chạy tự động N phôi + sửa xác nhận lưu bằng `daLuuThanhCong()` |
+| `4cc2d31`, `2a9a6d9` | Thêm `xuat_dom.js` v1.0.0 (người dùng tự viết) |
+| (chưa commit) | `xuat_dom.js` v2.0.0 → v2.0.1 |
 
-Cả 2 công cụ đã được người dùng test & xác nhận **chạy ổn định online** (2026-10-27).
+`them_san_pham_dan_ao.js` và `tao_phoi_san_pham.js` đã được người dùng xác nhận **chạy ổn định online** (2026-10-27).
+`xuat_dom.js` v2.0.1 đã test thực tế trên Shopee (2026-11-13).
 
-## 6. Ý tưởng chờ (chưa làm — cần hỏi trước)
+## 7. Ý tưởng chờ (chưa làm — cần hỏi trước)
 - Tampermonkey tự cập nhật (`@updateURL/@downloadURL`, đổi tên `.user.js`).
 - Bookmarklet: so khớp SKU chính xác, báo lỗi API thật, chạy lại riêng mã lỗi, khoá ô khi chạy.
 - Tampermonkey: danh sách ID phôi đã tạo, giới hạn/xác nhận số lượng lớn, điền SL tồn kho = 1.
+- Xuất DOM: xem mục 5 → "Ý tưởng chờ".
