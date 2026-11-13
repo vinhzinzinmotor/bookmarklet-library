@@ -1,7 +1,7 @@
 /* ==========================================================================
  * xuat_dom.js — Xuất cây DOM của trang (file .html hoặc clipboard) để Claude phân tích
  * Thư viện : bookmarklet-library (GitHub → Cloudflare Pages)
- * Phiên bản: 2.0.0 — 13/11/2026
+ * Phiên bản: 2.0.1 — 13/11/2026
  *
  * NGUYÊN TẮC AN TOÀN:
  *   - Chỉ ĐỌC trang. Không click, không điền, không sửa nội dung của trang.
@@ -16,19 +16,21 @@
  *
  * LÀM SẠCH:
  *   - Tắt        : giữ nguyên.
- *   - Thông minh : giữ chữ; che email, SĐT, dãy số dài, nonce/token (cả trong thuộc tính).
- *   - Nghiêm ngặt: chữ → [TEXT], trừ chữ của nút, label, option, th, legend, h1–h6.
+ *   - Thông minh : giữ chữ & số (giá, tồn kho, mã SP); che email, SĐT, nonce/token (cả trong thuộc tính).
+ *   - Nghiêm ngặt: chữ → [TEXT], trừ chữ của nút, label, option, th, legend, h1–h6; che thêm dãy số dài.
  *
  * v2.0.0: thuộc tính & trạng thái form thực tế, làm sạch 3 mức, đọc Shadow DOM
  *         + template, giữ <script src> / JSON-LD / vỏ <svg>, copy clipboard,
  *         gộp phần tử lặp, đánh dấu phần tử ẩn, nhận diện công nghệ của trang.
+ * v2.0.1: Thông minh không che số nữa (chỉ Nghiêm ngặt che [SỐ]);
+ *         bỏ thuộc tính data-v-xxxxxxxx do Vue tự sinh.
  * ========================================================================== */
 (function () {
   'use strict';
 
   var HOST_ID = '__xuat_dom_host__';
   var STORAGE_KEY = 'xuatDom.settings';
-  var VERSION = '2.0.0';
+  var VERSION = '2.0.1';
 
   // Bảng điều khiển đã mở → hiện lại, không tạo thêm
   var existing = document.getElementById(HOST_ID);
@@ -42,13 +44,13 @@
    * ---------------------------------------------------------------------- */
   var CLEAN_LABELS = {
     off: 'TẮT (giữ nguyên)',
-    smart: 'THÔNG MINH (che email, SĐT, số dài, nonce/token)',
-    strict: 'NGHIÊM NGẶT (chữ → [TEXT], trừ nút/label/option/th/legend/h1–h6)'
+    smart: 'THÔNG MINH (giữ chữ & số; che email, SĐT, nonce/token)',
+    strict: 'NGHIÊM NGẶT (chữ → [TEXT], trừ nút/label/option/th/legend/h1–h6; che cả dãy số dài)'
   };
   var CLEAN_HINTS = {
     off: 'Giữ nguyên toàn bộ chữ và thuộc tính',
-    smart: 'Giữ chữ để phân tích, chỉ che email, SĐT, dãy số ≥ 6 chữ số và nonce/token',
-    strict: 'Chữ thành [TEXT], chỉ giữ chữ của nút, label, option, tiêu đề'
+    smart: 'Giữ chữ và số (giá, tồn kho, mã SP), chỉ che email, SĐT và nonce/token',
+    strict: 'Chữ thành [TEXT], chỉ giữ chữ của nút, label, option, tiêu đề; che cả dãy số ≥ 6 chữ số'
   };
 
   function loadSettings() {
@@ -122,8 +124,11 @@
   var RX_EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
   var RX_PHONE = /(?:\+84|\b0)(?:[\s.-]?\d){8,10}(?!\d)/g;
   var RX_LONGNUM = /\d{6,}/g;
+  // Thuộc tính Vue tự sinh khi build (data-v-a2be135c, data-v-a2be135c-s) — đổi sau mỗi lần web cập nhật
+  var RX_VUE_SCOPE = /^data-v-[0-9a-f]{8}(-s)?$/;
 
   function isKeptAttr(n) {
+    if (RX_VUE_SCOPE.test(n)) return false;
     return KEEP_ATTRS[n] === 1 || n.indexOf('data-') === 0 || n.indexOf('aria-') === 0;
   }
 
@@ -182,7 +187,7 @@
     if (ctx.clean === 'strict' && !(parent && parent.nodeType === 1 && parent.closest(UI_TEXT_SEL))) {
       return '[TEXT]';
     }
-    return truncate(maskPatterns(t, ctx, true), TEXT_MAX);
+    return truncate(maskPatterns(t, ctx, ctx.clean === 'strict'), TEXT_MAX);
   }
 
   function cleanAttr(el, n, v, ctx) {
@@ -197,7 +202,7 @@
       } else if (n === 'value' && ctx.clean === 'strict' && isTypedField(el)) {
         v = '[TEXT]';
       } else if (TEXT_ATTRS[n]) {
-        v = maskPatterns(v, ctx, n === 'value' ? isTypedField(el) : n !== 'content');
+        v = maskPatterns(v, ctx, ctx.clean === 'strict' && (n === 'value' ? isTypedField(el) : n !== 'content'));
       } else if (n.indexOf('data-') === 0 || n.indexOf('aria-') === 0) {
         v = maskPatterns(v, ctx, false);
       }
@@ -302,7 +307,7 @@
       return '[ẨN]';
     }
     if (ctx.clean === 'strict') return '[TEXT]';
-    return truncate(maskPatterns(v, ctx, true), TEXT_MAX);
+    return truncate(maskPatterns(v, ctx, false), TEXT_MAX);
   }
 
   // ── Duyệt cây ──
@@ -593,7 +598,7 @@
       '<!--',
       '  XUẤT DOM — xuat_dom.js v' + VERSION,
       '  URL        : ' + escComment(ctx.clean === 'off' ? location.href : cleanUrl(location.href, ctx)),
-      '  Tiêu đề    : ' + escComment(ctx.clean === 'off' ? document.title : maskPatterns(document.title, ctx, true)),
+      '  Tiêu đề    : ' + escComment(ctx.clean === 'off' ? document.title : maskPatterns(document.title, ctx, ctx.clean === 'strict')),
       '  Thời gian  : ' + readableTime(now),
       '  Ngôn ngữ   : ' + escComment(document.documentElement.lang || '(không khai báo)'),
       '  Trạng thái : ' + document.readyState,
@@ -608,7 +613,8 @@
         st.scriptInline + ' nội tuyến (bỏ nội dung)',
       '  Iframe     : ' + st.iframeSame + ' cùng tên miền (đã gộp), ' +
         st.iframeCross + ' khác tên miền (không đọc được)',
-      '  Đã loại bỏ : style, noscript, comment, style inline, nội dung script nội tuyến, hình vẽ bên trong svg',
+      '  Đã loại bỏ : style, noscript, comment, style inline, nội dung script nội tuyến, hình vẽ bên trong svg,',
+      '               thuộc tính data-v-xxxxxxxx (mã băm Vue tự sinh)',
       '  Quy ước    : data-xd-an="1" = phần tử đang ẩn (tính cả các con bên trong)',
       '               value / checked / selected = trạng thái THỰC TẾ lúc xuất',
       '               [TEXT] [EMAIL] [SĐT] [SỐ] [ẨN] [MẬT KHẨU] = đã che | [BASE64] = data URI',
