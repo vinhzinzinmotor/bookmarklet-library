@@ -45,6 +45,11 @@ File mới → chỉ đổi tên file trong `s.src`, giữ nguyên `?v='+Date.no
 javascript:(function(){var s=document.createElement('script');s.src='https://bookmarklet-library.pages.dev/js/xuat_dom.js?t='+Date.now();document.body.appendChild(s);})();
 ```
 
+⚠️ **Trang có CSP chặt (vd TikTok Seller Center) chặn bookmarklet loader** — xem mục 6.2.
+Cách chạy thay thế đang dùng: **Chrome DevTools Snippets** (F12 → Sources → Snippets → snippet `xuat_dom` → Ctrl+Enter,
+hoặc trong DevTools nhấn Ctrl+P gõ `!xuat_dom`). Code chạy từ DevTools không bị CSP của trang chặn.
+Khi `xuat_dom.js` có bản mới → phải dán lại vào snippet.
+
 **Tampermonkey (`tao_phoi_san_pham.js`)** — chạy bản dán sẵn trong Tampermonkey trên máy.
 Chưa có `@updateURL/@downloadURL` → commit **không** tự cập nhật Tampermonkey; phải dán tay.
 (Ý tưởng chờ duyệt: thêm `@updateURL/@downloadURL` + đổi tên `.user.js` để tự cập nhật.)
@@ -197,16 +202,84 @@ URL & tiêu đề ở phần đầu file cũng được làm sạch.
 ### Phần đầu file (header)
 URL, Tiêu đề, Thời gian, Ngôn ngữ, Trạng thái tải, Cửa sổ + vị trí cuộn, **Công nghệ** (`techInfo`: WordPress/phiên bản — admin đọc từ body class `version-x-y`, WooCommerce, ACF, jQuery, select2, TinyMCE, Next.js, React, Vue, Angular), Chế độ (+ đường dẫn CSS vùng chọn, có `#shadow-root`), Làm sạch (số chỗ che), Phần tử (ẩn, shadow root), Gộp lặp, Script, Iframe, Đã loại bỏ, **Quy ước ký hiệu**.
 
-### Kết quả kiểm chứng (2026-11-13, Shopee "Thông tin bán hàng")
-v2.0.0 → v2.0.1: giá `[SỐ]` → `157000`; 2.180 thuộc tính Vue → 0; 273 KB → 233 KB. Thụt dòng vẫn chiếm ~60% dung lượng.
+### Kết quả kiểm chứng
+- **Shopee** (2026-11-13, "Thông tin bán hàng"): v2.0.0 → v2.0.1: giá `[SỐ]` → `157000`; 2.180 thuộc tính Vue → 0; 273 KB → 233 KB. Thụt dòng vẫn chiếm ~60% dung lượng.
+- **TikTok Seller Center** (2026-11-13, chạy qua Snippets, vùng `div#productlisting_sales_info`): 58 KB, 423 phần tử; lấy đủ giá trị thực tế (tồn kho, giá, SKU người bán, tùy chọn); không che nhầm.
+  Nhược điểm: dòng "Công nghệ" = "(không nhận diện được)" dù trang dùng React 18 + Arco Design.
 
 ### Ý tưởng chờ (chưa làm — cần hỏi trước)
 - Thụt dòng 1 dấu cách/cấp (giảm thêm ~25–30%).
 - Checkbox "Rút gọn phần tử ẩn" (mặc định tắt): chỉ giữ thẻ ngoài + số phần tử con.
+- `techInfo`: nhận diện React 18 qua thuộc tính `__reactFiber$…` / `__reactContainer$…` / `_reactRootContainer` trên phần tử; nhận diện Arco Design qua class `arco-icon` / `core-*`.
+- Bản Tampermonkey của xuat_dom (menu "📋 Xuất DOM", chạy mọi trang kể cả trang CSP chặt).
+- Bookmarklet nhúng toàn bộ code (nén 1 dòng, ~25 KB) — chạy được trên TikTok vì `default-src` có `'unsafe-inline'`; phải dán lại mỗi bản mới, hỏng nếu TikTok bỏ `'unsafe-inline'`.
 
 ---
 
-## 6. Lịch sử
+## 6. Nền tảng bên ngoài (phục vụ automation sắp tới)
+
+### 6.1 Shopee — Kênh Người bán (`banhang.shopee.vn`)
+- Viết bằng **Vue 3**; có thuộc tính `data-v-xxxxxxxx` (đã lọc khi xuất DOM).
+- **Không chặn** bookmarklet loader → `xuat_dom.js` chạy bằng bookmarklet bình thường.
+- Trang sửa SP: `/portal/product/<id>`; vùng "Thông tin bán hàng" = `div.product-detail-panel.product-sales-info`.
+- Ô giá phân loại: `.price-input input.eds-input__input`; có thuộc tính hữu ích `data-product-edit-field-unique-id="priceMo…"`.
+- Thư viện giao diện: `eds-*` (eds-input, eds-button, eds-popper…).
+
+### 6.2 TikTok Shop Seller Center (`seller-vn.tiktok.com`)
+**CSP (nguyên nhân bookmarklet loader không chạy):** trang gửi 2 lớp chính sách:
+- `Content-Security-Policy-Report-Only: script-src …` → chỉ ghi log, không chặn.
+- `Content-Security-Policy: default-src 'self' 'unsafe-eval' 'unsafe-inline' blob: … *.cloudflare.com … unpkg.com …` → **chặn thật**.
+  `bookmarklet-library.pages.dev` không có trong danh sách → `<script src>` bị chặn (log: *"The action has been blocked"*).
+  Bản thân đoạn `javascript:` vẫn chạy (`'unsafe-inline'` được phép).
+- Header của trang chuyển hướng/đăng nhập còn có `script-src … 'nonce-…' 'strict-dynamic'`.
+- Log console khác (`sw-backend.js`, `Dynokit`, `AgenticUI`, `GSAP`, `[SR]`, inline-script report-only…) là nhiễu của TikTok — bỏ qua.
+- **Không dùng** tiện ích "Disable CSP" (rủi ro khi đang đăng nhập tài khoản người bán), **không** đưa code lên npm/unpkg để lách.
+- → Xuất DOM: dùng **DevTools Snippets**. Automation: viết **userscript Tampermonkey** (không bị CSP trang chặn).
+
+**Công nghệ:** **React 18** (không có `window.React`, không có `data-reactroot`) + thư viện giao diện **Arco Design** (class `core-*`, `arco-icon`, `pulse-*`, `data-tid="m4b_*"`).
+
+**Trang sửa SP:** `/product/edit/<productId>?category_id=…&root_category_id=…&shop_region=VN&tab=2`
+Vùng "Thông tin bán hàng": `div#productlisting_sales_info`.
+
+**Selector bền — ưu tiên `data-id` (có ý nghĩa, không mã băm):**
+| Thành phần | Selector | Ghi chú |
+|---|---|---|
+| Bật/tắt biến thể | `[data-id="product.publish.variation.switch"] button[role=switch]` | trạng thái ở `aria-checked` |
+| Tên biến thể (cascader) | `[data-id^="product.publish.sale_property.name."]` | vd "VỊ TRÍ" |
+| Ô tên tùy chọn | `input[data-id^="product.publish.sale_property.value.name."]` | số cuối là id tùy chọn (805, 807…) |
+| Ảnh tùy chọn | `[data-id^="product.publish.sale_property.value.image."]` | cùng số id với ô tên |
+| Sửa hàng loạt | `[data-id="product.publish.skus.batch_edit"]` | chọn SKU (combobox), tồn kho, giá |
+| ├ Tồn kho hàng loạt | `[data-id="product.publish.skus.batch_edit.stock"] input` | placeholder "Số lượng" |
+| ├ Giá hàng loạt | `[data-id="product.publish.skus.batch_edit.price"] input` | placeholder "Giá bán lẻ" |
+| └ Nút "Áp dụng" | nút chứa chữ "Áp dụng" trong `.pulse-button-group` (data-uid `…button_onapply…`) | |
+| Phóng to bảng SKU | `[data-id="product.publish.skus.fullscreen_toggle"]` | |
+| Dòng SKU | `#productlisting_sales_info table tbody tr.core-table-tr` | |
+| **Tồn kho 1 SKU** | `[data-id="product.publish.skus.stock.<skuId>"] input` | `value="2"`, `aria-valuenow="2"` |
+| **Giá 1 SKU** | `[data-id="product.publish.skus.sale_price.<skuId>"] input` | `value="398.000"` (có dấu chấm), `aria-valuenow="398000"` (số thô) |
+| **SKU người bán** | `input#skus<skuId>` | vd `#skus1737620134400001451` → `64300K27V00ZA` |
+
+- Cột bảng SKU (thead): [Tên tùy chọn, vd "VỊ TRÍ"] | **Hàng có sẵn*** | **Giá bán lẻ*** | SKU người bán | (nút xoá).
+- `skuId` là số dài 19 chữ số (vd `1737620134400001451`) → từ SKU người bán tìm được `skuId` rồi điền đúng tồn kho/giá cùng dòng.
+- Đọc số: **dùng `aria-valuenow`** (số thô), không dùng `value` đã định dạng.
+
+**KHÔNG dùng làm selector (đổi sau mỗi lần TikTok build):**
+- Class có mã băm: `_shadowTips_7rrvi_5`, `_iconUploadContainer_zs0xj_123`, `sc-jsJBEP`, `kPToOl`…
+- Đuôi băm của `data-uid` (vd `shop_product:button:ad5a3`) — chỉ dùng phần chữ nếu cần (`button_onapply`, `button_ondeletesku`).
+- `id="skus"` — TikTok **dùng trùng** cho nhiều phần tử.
+- `data-v="eqdc58"`, `data-vv="…"` (mã phiên bản component).
+
+**Lưu ý khi viết automation:**
+- Input là **React controlled** → gán `el.value = x` không có tác dụng. Phải gọi setter gốc
+  `Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, x)` rồi `dispatchEvent(new Event('input', {bubbles:true}))` (+ `change`/`blur` nếu cần) — cần test thực tế.
+- Phần tử ẩn (`data-xd-an`): popup hover ảnh, icon xoá nội dung (`core-input-clear-icon`), `_shadowTips_*`, `DndDescribedBy-*` (chữ trợ năng kéo-thả) → bỏ qua.
+- Danh sách tùy chọn / dòng SKU kéo-thả được (`aria-roledescription="sortable"`) → không dựa vào thứ tự, dựa vào `data-id`.
+
+**Hướng automation đã gợi ý (chờ người dùng mô tả quy trình):**
+paste danh sách *SKU người bán | tồn kho | giá* từ Excel → tự điền đúng dòng (giống bảng SKU của `them_san_pham_dan_ao.js`); hoặc tạo biến thể/tùy chọn hàng loạt.
+
+---
+
+## 7. Lịch sử
 | Commit | Nội dung |
 |---|---|
 | `28ec69f` → `952cf25` | Khởi tạo, sửa JS đầu tiên, sửa font tiếng Việt (`_headers`) |
@@ -215,13 +288,17 @@ v2.0.0 → v2.0.1: giá `[SỐ]` → `157000`; 2.180 thuộc tính Vue → 0; 27
 | `78eeded` | Làm lại giao diện bookmarklet: bảng SKU + trạng thái từng dòng |
 | `1ba61c3` | Tampermonkey v1.4: Chạy tự động N phôi + sửa xác nhận lưu bằng `daLuuThanhCong()` |
 | `4cc2d31`, `2a9a6d9` | Thêm `xuat_dom.js` v1.0.0 (người dùng tự viết) |
-| (chưa commit) | `xuat_dom.js` v2.0.0 → v2.0.1 |
+| `001eadd` | `xuat_dom.js` v2.0.0 (thuộc tính/trạng thái form, làm sạch 3 mức, Shadow DOM, copy, gộp lặp, đánh dấu ẩn) |
+| `820df11` | `xuat_dom.js` v2.0.1 (Thông minh không che số; bỏ `data-v-*` của Vue) |
+| `ac9b4f5` | Bổ sung mục `xuat_dom.js` vào `CLAUDE.md` |
+| (chưa commit) | `CLAUDE.md`: mục 6 — Shopee & TikTok Seller Center (CSP, selector, lưu ý React) |
 
 `them_san_pham_dan_ao.js` và `tao_phoi_san_pham.js` đã được người dùng xác nhận **chạy ổn định online** (2026-10-27).
-`xuat_dom.js` v2.0.1 đã test thực tế trên Shopee (2026-11-13).
+`xuat_dom.js` v2.0.1 đã test thực tế trên Shopee (bookmarklet) và TikTok Seller Center (Snippets) (2026-11-13).
 
-## 7. Ý tưởng chờ (chưa làm — cần hỏi trước)
+## 8. Ý tưởng chờ (chưa làm — cần hỏi trước)
 - Tampermonkey tự cập nhật (`@updateURL/@downloadURL`, đổi tên `.user.js`).
 - Bookmarklet: so khớp SKU chính xác, báo lỗi API thật, chạy lại riêng mã lỗi, khoá ô khi chạy.
 - Tampermonkey: danh sách ID phôi đã tạo, giới hạn/xác nhận số lượng lớn, điền SL tồn kho = 1.
 - Xuất DOM: xem mục 5 → "Ý tưởng chờ".
+- TikTok Seller Center: userscript Tampermonkey tự điền tồn kho/giá theo SKU người bán (xem mục 6.2).
